@@ -1,0 +1,6 @@
+The MATLAB code files in this folder implement the control approach based on incomplete models via feedback linearization and derivative estimation for the example of a continuous reactor known as the pyrrole reaction system that is described in the paper "Multivariable Control Based on Incomplete Models via Feedback Linearization and Continuous-Time Derivative Estimation".
+
+The code files provide the results for the aforementioned paper, as follows:
+- The code file test_pyrrole_1.m provides the results in Section 5 of the paper "Multivariable Control Based on Incomplete Models via Feedback Linearization and Continuous-Time Derivative Estimation", namely Figures 2-7 by selecting the option "n", Figure 8 by selecting the option "t", and Figure 9 by selecting the option "k".
+
+Control via feedback linearization and derivative estimation is implemented for this example with the help of the auxiliary MATLAB code files dynamics_pyrrole_1.m, steps_1.m, solution_pyrrole_fA_fB.m, and newton_method.m.
