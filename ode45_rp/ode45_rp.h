@@ -1,3 +1,5 @@
+#define _USE_MATH_DEFINES
+#include <float.h>
 #include <math.h>
 #include <string.h>
 #include <mex.h>
