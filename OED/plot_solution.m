@@ -26,8 +26,8 @@ Dtrain = zeros(arcs,ncoeff+1); %Matrix with design vars
 
 while(true)
     reply_Dtrain = input('Type the arc sequence:\n');
-    if(isempty(reply_Dtrain)||all(reply_Dtrain==[1,-1,-2])||all(reply_Dtrain==[1,-2,-1])||all(reply_Dtrain==[-1,1,-1])||...
-            all(reply_Dtrain==[-1,1,-2])||all(reply_Dtrain==[-2,1,-1])||all(reply_Dtrain==[-2,1,-2]))
+    if(all(reply_Dtrain==0)||isempty(reply_Dtrain)||all(reply_Dtrain==[1,-1,-2])||all(reply_Dtrain==[1,-2,-1])||...
+            all(reply_Dtrain==[-1,1,-1])||all(reply_Dtrain==[-1,1,-2])||all(reply_Dtrain==[-2,1,-1])||all(reply_Dtrain==[-2,1,-2]))
         break;
     end
 end
@@ -58,7 +58,11 @@ chance = strcmp(reply_chance,'y');
 
 
 %% Optimal Solution
-if(~betad)
+if(all(reply_Dtrain==0))
+    Dtrain = zeros(31,ncoeff+1);
+    Dtrain(:,1) = (idinput(31,'prbs')+1)/2;
+    Dtrain(:,ncoeff+1) = linspace(0,12-12/31,31);
+elseif(~betad)
 if(isempty(reply_Dtrain))
     Dtrain(1,1) = 0.000000000000000;
     Dtrain(2,1) = 0.736253127427679;
@@ -282,9 +286,9 @@ yyaxis right
 if (jj<=4&&~betad&&fast)||(jj<=30&&~betad&&~fast)||(jj<=5&&betad)
 l2=plot(t,x(:,2,jj),'-','LineWidth',3,'Color',custom_cols(1,:));
 elseif (jj<=8&&jj>4&&~betad&&fast)||(jj<=60&&jj>30&&~betad&&~fast)||(jj<=11&&jj>5&&betad)
-plot(t,x(:,2,jj),'--','LineWidth',1.5,'Color',custom_cols(1,:));
+plot(t,x(:,2,jj),'-','LineWidth',1.75,'Color',custom_cols(1,:));
 elseif (jj<=12&&jj>8&&~betad&&fast)||(jj<=90&&jj>60&&~betad&&~fast)||(jj<=19&&jj>11&&betad)
-plot(t,x(:,2,jj),'-.','LineWidth',0.75,'Color',custom_cols(1,:));
+plot(t,x(:,2,jj),'-','LineWidth',0.5,'Color',custom_cols(1,:));
 elseif (jj<=120&&jj>90&&~betad&&~fast)
 plot(t,x(:,2,jj),':','LineWidth',0.5,'Color',custom_cols(1,:));
 end
@@ -339,7 +343,7 @@ if(chance)
 end
 legend(ph,LL,'Interpreter','latex','FontSize',22,'LineWidth',1.5,'Location','northwest');
 
-disp('Computing the expected utility...');
+disp('Computing the expected utility and variances...');
 u_d_1 = 0;
 u_mc1_1 = 0;
 u_mc2_1 = 0;
@@ -375,6 +379,11 @@ else
 u_mc2 = -u_mc2_1;
 u_mc3 = -u_mc3_1;
 end
+gv = reshape(x(end,2,:),[],1);
+Jv = reshape(1+x(end,2,:)/10,[],1);
+m_pr = variance_y(0,1,theta,w,gv,Jv,sigma_z);
+m_pi = integral(@(y)variance_y(y,2,theta,w,gv,Jv,sigma_z),-Inf,Inf,'ArrayValued',true,'AbsTol',1e-10,'RelTol',1e-6);
+m_pd = integral(@(y)variance_y(y,3,theta,w,gv,Jv,sigma_z),-Inf,Inf,'ArrayValued',true,'AbsTol',1e-10,'RelTol',1e-6);
 disp('Expected utility u_{D}:');
 disp(u_d);
 disp('Expected utility u_{MC} for state-independent Gaussian noise and normal prior:');
@@ -383,5 +392,11 @@ disp('Expected utility u_{MC} for state-independent noise:');
 disp(u_mc2);
 disp('Expected utility u_{MC} for state-dependent noise:');
 disp(u_mc3);
+disp('Covariance matrix for prior parameter distribution:');
+disp(m_pr);
+disp('Covariance matrix for posterior parameter distribution with state-independent noise:');
+disp(m_pi);
+disp('Covariance matrix for posterior parameter distribution with state-dependent noise:');
+disp(m_pd);
 
 return
