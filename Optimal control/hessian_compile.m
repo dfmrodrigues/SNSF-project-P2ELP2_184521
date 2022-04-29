@@ -461,7 +461,7 @@ for i = 1:length(crhs)
     for l = 1:size(vars,2)
         fchar{i} = replace(fchar{i},[vars{1,l},'l1'],[vars{1,l},'[l1-1]']);
     end
-    u{i} = crhs{i};
+    u{i} = crhs{i}(1:length(lb));
     uchar{i} = arrayfun(@ccode,formula(u{i}),'Uniform',0);
     uchar{i} = replace(uchar{i},'  t0 = ','');
     uchar{i} = replace(uchar{i},';','');
@@ -583,7 +583,7 @@ for i = 1:length(crhs)
             fchar{i}{j} = [];
         end
     end
-    for j = 1:nu
+    for j = 1:length(lb)
         if(~strcmp(uchar{i}{j},'0.0'))
             uchar{i}{j} = ['u[',num2str(j-1),'] = ',uchar{i}{j},';'];
         else
@@ -618,10 +618,10 @@ for i = 1:length(crhs)
             end
         end
     end
-    for j = 1:nu
+    for j = 1:length(lb)
         for l = 1:nx
             if(~strcmp(dudxpchar{i}{j,l},'0.0'))
-                dudxpchar{i}{j,l} = ['u_x[',num2str(j-1+(l-1)*nu),'] = ',...
+                dudxpchar{i}{j,l} = ['u_x[',num2str(j-1+(l-1)*length(lb)),'] = ',...
                     dudxpchar{i}{j,l},';'];
             else
                 dudxpchar{i}{j,l} = [];

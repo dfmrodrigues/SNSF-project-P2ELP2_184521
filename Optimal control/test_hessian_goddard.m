@@ -3,18 +3,18 @@ close all
 clear
 profile on
 
-phi_form = str2sym({'x1';'x2';'-x2';'x3';'-x3';'t-2'});
-f_form = str2sym({'1/2*x2^2';'x3+u1';'-u1'});
-x0 = str2sym({'0';'1';'1'});
-lb = str2sym({'-10'});
-ub = str2sym({'10'});
+phi_form = str2sym({'-x1';'0.6-x3';'t-0.25'});
+f_form = str2sym({'x2';'(u1-310*(x2*(1+tanh(500*(x2+0.03)))/2)^2*exp(500*(1-x1)))/x3-1/x1^2';'-u1/0.5*(1+tanh(50*(x3-0.3)))/2'});
+x0 = str2sym({'1';'0';'1'});
+lb = str2sym({'0.0'});
+ub = str2sym({'3.5'});
 gh_form = str2sym({});
 h_form = str2sym({});
 clhs = str2sym({'u1'});
-crhs = {str2sym({'-x2-x3'})};
+crhs = cell(1,0);
 nci = [];
 np = 0;
-ni = 0;
+ni = 1;%2;
 nt = 3;
 nti = 0;
 phi_form = vpa(subs(phi_form));
@@ -36,21 +36,22 @@ nphi = length(phi_form);
 idx_x0 = length(x0)+(1:ni);
 av = [-2,1,-1];
 ti = zeros(1,0);
-tsc = [0.298965977,1.927246292];
-tfc = 2.0;
-x0c = x0;
-p0c = [];
-sc = [1,1,1];
+tsc = [0.02,0.07];
+tfc = 0.2;
+x0c = [x0;2];
+p0c = 20;
+sc = [0.1,0.1,0.1,1,10];
 hessian_check(nci,1:nphi,av,idx_x0,ti,tsc,tfc,x0c,p0c,sc,deriv);
 
-lam = zeros(nphi,nt+length(x0)+1);
-pi0 = zeros(nt+length(x0),1);
-[u,fval,~,~,nu] = hessian_fmincon(nci,nphi,av,np,idx_x0,ti,tsc,tfc,x0c,p0c,sc,lam,pi0,lb,ub,0.001);
-ts = u(1:2);
-tf = u(3);
-p0 = [];
-addpath('./hessian');
-hessian_plot(nci,1:nphi,av,ti,0,ts,tf,x0,p0,lam,pi0,nu.ineqnonlin)
-rmpath('./hessian');
+tf = 0.25;
+av = 3;%[-2,1,-1];
+nt = 3;
+scv = [0.1,0.1,0.1,1,10];
+deriv = 0;
+n = 6;
+m = 1000;
+cheby = false;
+suppl = 0;
+[tau,p_sol,d_sol,deg,tel,fvalv,uv,N,p_mon,p_s,d,dus,flag,cphi,As,ys,y,Av,yv,u0,du,sc] = hessian_solve(tf,x0,nci,nphi,av,np,ni,nt,ti,scv,deriv,lb,ub,n,m,cheby,suppl);
 
 profile viewer

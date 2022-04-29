@@ -1,8 +1,8 @@
 % An implementation of direct parsimonious input parameterization
 % Adapted from Joel Andersson, 2016
 
-function [ts_opt,z0_opt,p0_opt,x0_opt,lam_opt,phi_opt,psi_opt,F_opt] =...
-    direct_parsimonious(t0,tf,N,cvode,lbu,ubu,av,ts0,z00,p00,lbx,ubx,x0,t,x,u,p,pm,xdot,qdot,phi,psi,eps0,lam0)
+function [tf_opt,ts_opt,z0_opt,p0_opt,x0_opt,lam_opt,phi_opt,psi_opt,F_opt] =...
+    direct_parsimonious(t0,tf,N,cvode,lbu,ubu,av,tf0,ts0,z00,p00,lbx,ubx,x0,t,x,u,p,pm,xdot,qdot,phi,psi,eps0,deriv,lam0)
 
 import casadi.*
 
@@ -26,23 +26,30 @@ else
     sc = eps0{7};
 end
 if(~isempty(lam0))
-    lam_ts0 = lam0{1};
-    lam_z00 = lam0{2};
-    lam_p00 = lam0{3};
-    lam_dt0 = lam0{4};
-    lam_zf0 = lam0{5};
-    lam_T0 = lam0{6};
+    lam_tf0 = lam0{1};
+    lam_ts0 = lam0{2};
+    lam_z00 = lam0{3};
+    lam_p00 = lam0{4};
+    lam_dt0 = lam0{5};
+    lam_zf0 = lam0{6};
+    lam_xi0 = lam0{7};
+    lam_T0 = lam0{8};
 end
 nt = length(av);
 ni = sum(av>0);
 it0 = 1;
 ii0 = 1+(t0>0);
-while(it0<nt&&t0>ts0(it0))
+while(it0<nt&&(tf0<=t0||t0>ts0(it0)))
     it0 = it0+1;
     ii0 = ii0+1;
 end
 nt0 = length(av(it0:end));
-ni0 = sum(av(ii0:end)>0);
+if(deriv>0)
+    nzi0 = sum(av(it0:end)>0);
+elseif(deriv==0)
+    nzi0 = sum(av(ii0:end)>0);
+end
+npi0 = sum(av(ii0:end)>0);
 ci = [1:ni,-(1:(length(lbu)+length(ubu)))];
 crhs = cell(1,ni+length(lbu)+length(ubu));
 prhs = cell(1,ni+length(lbu)+length(ubu));
@@ -150,15 +157,28 @@ if(~isempty(lam0))
     lam_g0 = [];
 end
 
-% Formulate the NLP
-dT0 = cell(1,nt);
-for i = it0:nt
+% Deal with free final and switching times
+Tf = MX.sym('Tf');
+flagt = double(tf0>t0);
+if(flagt)
+    w = [w,{Tf}];
+    lbw = [lbw;t0];
+    ubw = [ubw;tf];
+    w0 = [w0;tf0];
+    if(~isempty(lam0))
+        lam_w0 = [lam_w0;lam_tf0];
+    end
+else
+    Tf = t0;
+end
+dT = cell(1,nt);
+for i = 1:nt
     if(i>it0)
         Tprev = Ti;
     else
         Tprev = t0;
     end
-    if(i<nt)
+    if(i<nt&&i>=it0)
         Ti = MX.sym(['T_' num2str(i)]);
         if(length(eps0)==5)
             J = J+eps_dJdu0(:,i)*(Ti-u0(i));
@@ -173,14 +193,18 @@ for i = it0:nt
         if(~isempty(lam0))
             lam_w0 = [lam_w0;lam_ts0(i)];
         end
+    elseif(i<it0)
+        Ti = t0;
     else
-        Ti = tf;
+        Ti = Tf;
     end
-    dT0{i} = Ti-Tprev;
-    g = [g,{-dT0{i}}];
+    dT{i} = Ti-Tprev;
+    g = [g,{-dT{i}}];
     lbg = [lbg;-inf];
-    if(av(i)>0&&t0==0)
-        ubg = [ubg;-min(ubu-lbu)/1e-2];
+    if(i<it0)
+        ubg = [ubg;inf];
+    elseif(av(i)>0&&t0==0&&deriv>0)
+        ubg = [ubg;-min(ubu-lbu)/deriv];
     else
         ubg = [ubg;0];
     end
@@ -189,12 +213,13 @@ for i = it0:nt
     end
 end
 
+% Formulate the NLP
 Xi = x0(1:nx);
 U00 = cell(1,nt);
 for i = 1:nt
     if(av(i)>0)
         idx_i = ((av(i)-1)*nu+1):(av(i)*nu);
-        if(i>=ii0)
+        if((deriv>0&&i>=it0)||(deriv==0&&i>=ii0))
             U0i = MX.sym(['U0_' num2str(i)],nu);
             if(length(eps0)==5)
                 J = J+eps_dJdu0(:,nt-1+idx_i)*(U0i-u0(nt-1+idx_i));
@@ -236,9 +261,15 @@ for i = 1:nt
             if(~isempty(lam0))
                 lam_w0 = [lam_w0;lam_p00(idx_i)];
             end
-            g = [g,{U00{i}+Pi*dT0{i}}];
-            lbg = [lbg;lbu];
-            ubg = [ubg;ubu];
+            if(deriv>0)
+                g = [g,{U00{i}+Pi*dT{i}}];
+                lbg = [lbg;lbu];
+                ubg = [ubg;ubu];
+            elseif(deriv==0)
+                g = [g,{Pi}];
+                lbg = [lbg;zeros(nu,1)];
+                ubg = [ubg;zeros(nu,1)];
+            end
             if(~isempty(lam0))
                 lam_g0 = [lam_g0;lam_zf0(end-ni*nu+idx_i)];
             end
@@ -260,19 +291,37 @@ if(length(eps0)~=5)
     end
 end
 
-for i = it0:nt
-    % Integrate till the end of the interval
-    Fi = F0{i}('x0',Xi,'p',[pm;dT0{i};P0]);
-    Xi = Fi.xf;
-    J = J+Fi.qf;
+for i = 1:nt
+    if(i>=it0)
+        % Integrate till the end of the interval
+        Fi = F0{i}('x0',Xi,'p',[pm;dT{i};P0]);
+        Xi = Fi.xf;
+        J = J+Fi.qf;
+        
+        g = [g,{Xi}];
+        if(i>it0||av(i)<=0||(all(x0>=lbx)&&all(x0<=ubx)))
+            lbg = [lbg;lbx];
+            ubg = [ubg;ubx];
+        else
+            lbg = [lbg;-inf*ones(nx+ni*nu,1)];
+            ubg = [ubg;inf*ones(nx+ni*nu,1)];
+        end
+    else
+        g = [g,{zeros(nx+ni*nu,1)}];
+        lbg = [lbg;-inf*ones(nx+ni*nu,1)];
+        ubg = [ubg;inf*ones(nx+ni*nu,1)];
+    end
+    if(~isempty(lam0))
+        lam_g0 = [lam_g0;lam_xi0(end+(i-1-nt)*(nx+ni*nu)+(1:(nx+ni*nu)))];
+    end
 end
 
 % Add terminal constraints
 phi_opt = Function('phi',{x,t},{phi},{'xf','tf'},{'phif'});
 psi_opt = Function('psi',{x,t},{psi},{'xf','tf'},{'psif'});
-Phif = phi_opt('xf',Xi,'tf',tf);
+Phif = phi_opt('xf',Xi,'tf',Tf);
 J = J+Phif.phif;
-Psif = psi_opt('xf',Xi,'tf',tf);
+Psif = psi_opt('xf',Xi,'tf',Tf);
 T = T+Psif.psif;
 g = [g,{T}];
 lbg = [lbg;-inf*ones(npsi,1)];
@@ -311,6 +360,12 @@ end
 w_opt = full(sol.x);
 lam_w_opt = full(sol.lam_x);
 lam_g_opt = full(sol.lam_g);
+if(flagt)
+    tf_opt = w_opt(1:flagt);
+else
+    tf_opt = tf0;
+end
+lam_tf_opt = lam_w_opt(1:flagt);
 if(~isempty(lam0))
     ts_opt = ts0(:);
     z0_opt = z00(:);
@@ -328,26 +383,30 @@ else
 end
 x0_opt = x0;
 for i = it0:(nt-1)
-    ts_opt(i) = w_opt(i-nt+nt0);
-    lam_ts_opt(i) = lam_w_opt(i-nt+nt0);
+    ts_opt(i) = w_opt(flagt+i-nt+nt0);
+    lam_ts_opt(i) = lam_w_opt(flagt+i-nt+nt0);
 end
 for i = 1:(nt-1)
     if(av(i)>0)
         idx_i = ((av(i)-1)*nu+1):(av(i)*nu);
-        if(i>=ii0)
-            z0_opt(idx_i) = w_opt(nt0-1+av(i)-ni+ni0);
-            p0_opt(idx_i) = w_opt(nt0-1+ni0*nu+av(i)-ni+ni0);
-            lam_z0_opt(idx_i) = lam_w_opt(nt0-1+av(i)-ni+ni0);
-            lam_p0_opt(idx_i) = lam_w_opt(nt0-1+ni0*nu+av(i)-ni+ni0);
+        if((deriv>0&&i>=it0)||(deriv==0&&i>=ii0))
+            z0_opt(idx_i) = w_opt(flagt+nt0-1+av(i)-ni+nzi0);
+            lam_z0_opt(idx_i) = lam_w_opt(flagt+nt0-1+av(i)-ni+nzi0);
             x0_opt(nx+idx_i) = z0_opt(idx_i);
+        end
+        if(i>=ii0)
+            p0_opt(idx_i) = w_opt(flagt+nt0-1+nzi0*nu+av(i)-ni+npi0);
+            lam_p0_opt(idx_i) = lam_w_opt(flagt+nt0-1+nzi0*nu+av(i)-ni+npi0);
         end
     end
 end
-lam_dt_opt = lam_g_opt(1:nt0);
-lam_zf_opt = lam_g_opt((nt0+1):(end-npsi));
+lam_dt_opt = lam_g_opt(1:nt);
+lam_zf_opt = lam_g_opt((nt+1):(end-npsi-(nx+ni*nu)*nt));
+lam_xi_opt = lam_g_opt((end-npsi-(nx+ni*nu)*nt+1):(end-npsi));
 lam_T_opt = lam_g_opt((end-npsi+1):end);
 X0 = MX.sym('X0',nx+ni*nu);
 P = MX.sym('P',np);
+TF = MX.sym('TF',1);
 TS = MX.sym('TS',nt-1);
 Z0 = MX.sym('Z0',ni*nu);
 P0 = MX.sym('P0',ni*nu);
@@ -356,9 +415,9 @@ i = it0;
 for k = 1:N
     Xk = X0;
     Qk = 0;
-    tb = t0+(tf-t0)/N*(k-1);
-    te = t0+(tf-t0)/N*k;
-    while(i<nt&&te>ts_opt(i))
+    tb = t0+(TF-t0)/N*(k-1);
+    te = t0+(TF-t0)/N*k;
+    while(i<nt&&t0+(tf_opt-t0)/N*k>ts_opt(i))
         Fk = F0{i}('x0',Xk,'p',[P;TS(i)-tb;P0]);
         Xk = Fk.xf;
         Qk = Qk+Fk.qf;
@@ -368,8 +427,8 @@ for k = 1:N
     Fk = F0{i}('x0',Xk,'p',[P;te-tb;P0]);
     Xk = Fk.xf;
     Qk = Qk+Fk.qf;
-    F_opt{k} = Function(['F_',num2str(k)],{X0,P,TS,Z0,P0},{Xk,Qk},{'x0','p','ts','z0','p0'},{'xf','qf'});
+    F_opt{k} = Function(['F_',num2str(k)],{X0,P,TF,TS,Z0,P0},{Xk,Qk},{'x0','p','tf','ts','z0','p0'},{'xf','qf'});
 end
-lam_opt = {lam_ts_opt,lam_z0_opt,lam_p0_opt,lam_dt_opt,lam_zf_opt,lam_T_opt};
+lam_opt = {lam_tf_opt,lam_ts_opt,lam_z0_opt,lam_p0_opt,lam_dt_opt,lam_zf_opt,lam_xi_opt,lam_T_opt};
 
 end

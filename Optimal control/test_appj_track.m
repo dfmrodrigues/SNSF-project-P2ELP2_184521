@@ -3,7 +3,9 @@ close all
 clear
 profile on
 
-% Define constants for the model
+import casadi.*
+
+tfmax = 120;
 m1 = 38*2.39;
 m2 = 0.003*0.82;
 Tinf = 298.15; % K
@@ -15,6 +17,167 @@ r = 1.5e-3; % m
 eta = 0.4;
 K = 1.43; % W m-2 K-1
 T0 = 310.15; % K
+Pmin = 1.0; % W
+Pmax = 5.0; % W
+Tmax = 316.15; % K
+CEMsp = 1.5; % min
+k1p = m2*eta/Rho/Cp/pi/r^2/d;%*0.8;
+k2p = 2*pi*r*d*K*m1/Rho/Cp/pi/r^2/d*(1/2+(Tmax-Tb)/(Tb-Tinf))*log(1+(Tb-Tinf)/(Tmax-Tb));%0;
+k3p = 0;%2*pi*r*d*K*m1/Rho/Cp/pi/r^2/d*0.8;
+pp = [k1p;k2p;k3p];
+
+t0 = 0;
+tf = tfmax; % Time horizon
+N = 50; % number of control intervals
+cvode = true;
+
+% Bounds on u
+lbu = Pmin;
+ubu = Pmax;
+
+% Bounds on x
+lbx = [-inf;-inf];
+ubx = [inf;Tmax];
+
+% Initial condition for x
+x0 = [0.0;T0];
+
+% Declare model variables
+t = SX.sym('t');
+x1 = SX.sym('x1');
+x2 = SX.sym('x2');
+x = [x1;x2];
+u1 = SX.sym('u1');
+u = u1;
+k1 = SX.sym('k1');
+k2 = SX.sym('k2');
+k3 = SX.sym('k3');
+p = [k1;k2;k3];
+nx = size(x,1);
+nu = size(u,1);
+np = size(p,1);
+
+% Model equations
+CEM = x1;
+T = x2;
+P = u1;
+xdot = [0.5^(43.0+273.15-T)/60.0;k1*P-k2*((T-Tinf)-log(1+exp(10*(T-Tb)))/10)./(log(T-Tinf)-log(log(1+exp(10*(T-Tb)))/10))-k3*(T-(Tinf+Tb)/2)];
+% xdot = [0.5^(43.0+273.15-T)/60.0;k1*P-k3*(T-(Tinf+Tb)/2)];
+k1m = m2*eta/Rho/Cp/pi/r^2/d*0.8;
+k2m = 0;
+k3m = 2*pi*r*d*K*m1/Rho/Cp/pi/r^2/d*0.8;
+pm = [k1m;k2m;k3m];
+Spm = diag([0.01;0.025;0.005].^2);
+
+% Objective term
+qdot = 0*u1^2;
+phi = t;
+psi = [CEMsp-CEM;T-T0];
+npsi = size(psi,1);
+
+% Initial solution using direct single shooting
+pms = pm;
+Spms = Spm;
+tf0 = tf;
+u0 = (lbu+ubu)/2*ones(1,N);
+x0 = x0(1:nx);
+lam0 = {};
+[tf_opts,u_opts,x0_opts,lam_opts,phi_opts,psi_opts,F_opts] =...
+    direct_single_shooting(t0,tf,N,cvode,lbu,ubu,tf0,u0,lbx,ubx,x0,t,x,u,p,pms,xdot,qdot,phi,psi,lam0);
+tv_opts = linspace(t0,tf_opts,N+1);
+[J_opts,T_opts,x_opts] = calc_single_shooting(N,x0_opts,tf_opts,u_opts,pms,phi_opts,psi_opts,F_opts);
+
+% Simulate MPC
+J_sims = zeros(1,N+1);
+T_sims = zeros(npsi,N+1);
+tf_sims = zeros(size(tf_opts));
+u_sims = zeros(size(u_opts));
+tv_sims = zeros(1,N+1);
+x_sims = zeros(size(x_opts));
+tf0k = tf_opts;
+u0k = u_opts;
+x0k = x_opts(:,1);
+t0k = t0;
+lam0k = lam_opts;
+for k = 1:(N+1)
+    x_sims(:,k) = x0k(:,1);
+    tv_sims(k) = t0k;
+    [tf_optk,u_optk,x0_optk,lam_optk,phi_optk,psi_optk,F_optk] =...
+        direct_single_shooting(t0k,tf,N-k+1,cvode,lbu,ubu,tf0k,u0k,lbx,ubx,x0k,t,x,u,p,pms,xdot,qdot,phi,psi,lam0k);
+    [J_optk,T_optk,x_optk] = calc_single_shooting(N-k+1,x0_optk,tf_optk,u_optk,pms,phi_optk,psi_optk,F_optk);
+    disp(sum(sum(abs(tf_optk-tf_opts))))
+    disp(sum(sum(abs(u_optk(:,1:end-1)-u_opts(:,k:end-1)))))
+    disp(sum(sum(abs(x_optk(:,1:end)-x_opts(:,k:end)))))
+    J_sims(:,k) = J_optk;
+    T_sims(:,k) = T_optk;
+    tf_sims(:,k) = tf_optk;
+    u_sims(:,k) = u_optk(:,1);
+    if(k==N+1)
+        break;
+    end
+    tf0k = tf_optk;
+    u0k = u_optk(:,2:end);
+    fk = F_optk{1}('x0',x_optk(:,1),'p',pp,'tf',tf_optk,'u',u_optk(:,1));
+    x0k = full(fk.xf);
+    t0k = t0k+(tf_optk-t0k)/(N-k+1);
+    lam_tf_optk = lam_optk{1};
+    lam_u_optk = lam_optk{2};
+    lam_dt_optk = lam_optk{3};
+    lam_x_optk = lam_optk{4};
+    lam_dx_optk = lam_optk{5};
+    lam_T_optk = lam_optk{6};
+    lam0k = {lam_tf_optk,lam_u_optk(:,2:end),lam_dt_optk,lam_x_optk(:,2:end),lam_dx_optk(:,2:end),lam_T_optk};
+end
+disp(tf_sims-tf_opts)
+disp(u_sims-u_opts)
+disp(x_sims-x_opts)
+
+% Plot the solution
+tP = u_sims;
+tout = tv_sims;
+CEM = x_sims(1,:);
+T = x_sims(2,:);
+Tr0 = @(t)Tmax*ones(size(t));
+figure;
+ax{1} = subplot(1,3,1);
+ax{2} = subplot(1,3,2);
+ax{3} = subplot(1,3,3);
+hold(ax{1},'on'),plot(ax{1},tout,T-T0,'b','LineWidth',2);set(ax{1},'Children',flipud(get(ax{1},'Children')));
+hold(ax{1},'on'),plot(ax{1},tout,Tr0(tout)-T0,'r');
+hold(ax{1},'on'),plot(ax{1},tout,zeros(size(tout)),'r--');
+title(ax{1},'');ylabel(ax{1},'$T(t)-T_{0}$ [K]','Interpreter','LaTeX','FontSize',20);
+p = xlabel(ax{1},'');set(p,'String','$t$ [s]','Interpreter','LaTeX','FontSize',20);
+set(ax{1},'FontSize',18,'XTick',0:30:90,'XTickLabel',0:30:90);
+hold(ax{2},'on'),plot(ax{2},tout,CEM,'b','LineWidth',2);set(ax{2},'Children',flipud(get(ax{2},'Children')));
+hold(ax{2},'on'),plot(ax{2},tout,CEMsp*ones(size(tout)),'r--');
+title(ax{2},'');ylabel(ax{2},'$CEM(t)$ [min]','Interpreter','LaTeX','FontSize',20);
+p = xlabel(ax{2},'');set(p,'String','$t$ [s]','Interpreter','LaTeX','FontSize',20);
+set(ax{2},'FontSize',18,'XTick',0:30:90,'XTickLabel',0:30:90);
+hold(ax{3},'on'),stairs(ax{3},tout,tP(1,:),'b','LineWidth',2);set(ax{3},'Children',flipud(get(ax{3},'Children')));
+hold(ax{3},'on'),plot(ax{3},tout,Pmin*ones(size(tout)),'r');
+hold(ax{3},'on'),plot(ax{3},tout,Pmax*ones(size(tout)),'r');
+title(ax{3},'');ylabel(ax{3},'$\tilde{P}(t)$ [W]','Interpreter','LaTeX','FontSize',20);
+p = xlabel(ax{3},'');set(p,'String','$t$ [s]','Interpreter','LaTeX','FontSize',20);
+set(ax{3},'FontSize',18,'XTick',0:30:90,'XTickLabel',0:30:90);
+set(gcf,'Units','normalized'),set(gcf,'OuterPosition',[1,1,2,1].*get(gcf,'OuterPosition'));
+keyboard
+
+clc
+close all
+clear
+
+% Define constants for the model
+m1 = 38*2.39;
+m2 = 0.003*0.82;
+Tinf = 298.15; % K
+Tb = 308.15; % K
+Rho = 2800.0; % kg m-3
+Cp = 795.0; % J kg-1 K-1
+d = 0.2e-3; % m
+r = 1.5e-3; % m
+eta = 0.4;
+K = 1.43; % W m-2 K-1
+T0 = 310.15;%312.15; % K
 Pmin = 1.0; % W
 Pmax = 5.0; % W
 Tmax = 316.15; % K
@@ -68,8 +231,8 @@ addpath('../ode45_rp');
 idx_x0 = length(x0)+(1:ni);
 av = [-2,-1];
 ti = zeros(1,0);
-tsc = 92.8404967453808;
-tfc = 109.4495929298785;
+tsc = 92.8404967453808;%91.178807262324270;
+tfc = 109.4495929298785;%99.156543394002369;
 x0c = x0;
 p0c = [];
 sc = [100,100];
@@ -86,7 +249,9 @@ deriv = 1e-2; % Scaling of slope in sensitivity-seeking arcs (not used)
 % m = 1000;
 % cheby = false;
 % suppl = 0;
-% [tau,p_sol,d_sol,deg,tel,fvalv,uv,N,p_mon,p_s,d,dus,flag,cphi,As,ys,y,Av,yv,u0,du,~] = hessian_solve(tf,x0,nci,nphi,av,np,ni,nt,ti,scv,deriv,lb,ub,n,m,cheby,suppl);
+% xunits = 's';
+% yunits = 'W';
+% [tau,p_sol,d_sol,deg,tel,fvalv,uv,N,p_mon,p_s,d,dus,flag,cphi,As,ys,y,Av,yv,u0,du,~] = hessian_solve(tf,x0,nci,nphi,av,np,ni,nt,ti,scv,deriv,lb,ub,n,m,cheby,suppl,xunits,yunits);
 % u = uv{1};
 % Initialization of random number seed to make the random number sequence equal to the case of global solution to the OCP
 rng(42,'twister');
@@ -160,7 +325,7 @@ Uk = Uk(:,max(1,end-dt+1):end);
 lam = [[dJk*Uk'/(Uk*Uk');dTk(1,:)*Uk'/(Uk*Uk');dTk(2,:)*Uk'/(Uk*Uk')],zeros(nphi,length(x0))]; % Compute updated value of modifiers
 pi0 = [ts0;tf0;x0]; % Compute initial values of decision variables
 % Commented code below would be used for global solution to the OCP
-% [tau,p_sol,d_sol,deg,tel,fvalv,uv,N,p_mon,p_s,d,dus,flag,cphi,As,ys,y,Av,yv,u0,du,~] = hessian_solve(tf,x0,nci,nphi,av,np,ni,nt,ti,scv,deriv,lb,ub,n,m,cheby,suppl,lam,pi0);
+% [tau,p_sol,d_sol,deg,tel,fvalv,uv,N,p_mon,p_s,d,dus,flag,cphi,As,ys,y,Av,yv,u0,du,~] = hessian_solve(tf,x0,nci,nphi,av,np,ni,nt,ti,scv,deriv,lb,ub,n,m,cheby,suppl,xunits,yunits,lam,pi0);
 % u = uv{1};
 % Initialize random number seed to make the random number sequence equal to the case of global solution to the OCP
 rng(42,'twister');

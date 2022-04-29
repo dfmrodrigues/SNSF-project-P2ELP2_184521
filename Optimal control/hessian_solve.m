@@ -15,8 +15,15 @@ else
     cheby = varargin{3};
     suppl = varargin{4};
     if(length(varargin)>4)
-        lam = varargin{5};
-        pi0 = varargin{6};
+        xunits = varargin{5};
+        yunits = varargin{6};
+    else
+        xunits = '-';
+        yunits = '-';
+    end
+    if(length(varargin)>6)
+        lam = varargin{7};
+        pi0 = varargin{8};
     else
         lam = zeros(nphi,size(av,2)+length(x0)+2*ni+1);
         pi0 = zeros(size(av,2)+length(x0)+2*ni,1);
@@ -237,8 +244,20 @@ disp(uv{l});
 end
 delete(gcp('nocreate'));
 lmin = min(cell2mat(fvalv))==cell2mat(fvalv);
-figure,plot(tout{lmin},uout{lmin},'LineWidth',1.5);hold on;
+figd = figure(100);
+if(isfile('hessian_solve.fig'))
+figs = open('hessian_solve.fig');
+copyobj(figs.Children,figd)
+close(figs);
+end
+if(nseq==1)
+    plot(tout{lmin},uout{lmin},'Color',[0 0.4470 0.7410],'LineWidth',1.5,'LineStyle','--');
+else
+    plot(tout{lmin},uout{lmin},'Color',[0 0.4470 0.7410],'LineWidth',1.5,'LineStyle','-');
+end
+hold on;
 set(gca,'FontSize',20,'Position',[0.18,0.135,0.78,0.78]);
-xlabel('$t$ [min]','Interpreter','LaTeX','FontSize',22);
-ylabel('$u^{*}(t)$ [mL min$^{-1}$]','Interpreter','LaTeX','FontSize',22);
+xlabel(['$t$ [',xunits,']'],'Interpreter','LaTeX','FontSize',22);
+ylabel(['$u^{*}(t)$ [',yunits,']'],'Interpreter','LaTeX','FontSize',22);
+savefig('hessian_solve.fig');
 end
